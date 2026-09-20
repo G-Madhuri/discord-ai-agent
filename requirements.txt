@@ -1,0 +1,21 @@
+# --- Web / API ---
+# Lower bounds follow google-adk's requirements (fastapi>=0.133, pydantic>=2.12)
+# so the resolver has one consistent solution.
+fastapi>=0.133,<1
+uvicorn[standard]>=0.34,<1
+pydantic>=2.12,<3
+pydantic-settings>=2.7,<3
+python-dotenv>=1.0,<2
+httpx>=0.28,<1
+
+# --- Database ---
+SQLAlchemy[asyncio]>=2.0.36,<3
+asyncpg>=0.30,<0.31
+alembic>=1.14,<2
+
+# --- Discord ---
+discord.py>=2.4,<3
+
+# --- AI agent (Google ADK + Gemini via Vertex AI) ---
+google-adk>=2.9,<3
+google-cloud-aiplatform>=1.95.1

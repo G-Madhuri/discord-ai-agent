@@ -1,0 +1,51 @@
+# Local development only. Production runs on Cloud Run with Cloud SQL.
+name: discord-assignment-agent
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: discord_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/discord_agent
+      PORT: "8080"
+    ports:
+      - "8000:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  bot:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    env_file:
+      - ../.env
+    environment:
+      BACKEND_BASE_URL: http://api:8080
+    command: python -m app.discord.run_bot
+    depends_on:
+      - api
+    profiles:
+      - bot
+
+volumes:
+  pgdata:
