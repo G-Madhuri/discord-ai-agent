@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from app import __version__
 from app.api.errors import register_exception_handlers
 from app.api.router import api_router
-from app.api.routes import health
+from app.api.routes import discord, health
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import dispose_engine
@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
     app.include_router(health.router)
+    app.include_router(discord.router)
     app.include_router(api_router, prefix=settings.api_prefix)
     return app
 

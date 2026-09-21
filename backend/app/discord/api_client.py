@@ -11,6 +11,9 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class BackendError(RuntimeError):
@@ -44,7 +47,14 @@ class BackendClient:
         if self._client is None:
             await self.start()
         assert self._client is not None
-        response = await self._client.post(f"{self._prefix}{path}", json=json, params=params)
+        url = f"{self._prefix}{path}"
+        try:
+            response = await self._client.post(url, json=json, params=params)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            logger.warning("Backend connection error (%s), retrying once...", exc)
+            response = await self._client.post(url, json=json, params=params)
+
+        logger.debug("POST %s -> %s", url, response.status_code)
         if response.status_code >= 400:
             raise BackendError(_extract_message(response), response.status_code)
         return response.json()
@@ -55,6 +65,7 @@ class BackendClient:
         assert self._client is not None
         try:
             response = await self._client.get("/health")
+            logger.debug("GET /health -> %s", response.status_code)
             return response.status_code == 200
         except httpx.HTTPError:
             return False

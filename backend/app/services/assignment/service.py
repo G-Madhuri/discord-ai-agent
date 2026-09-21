@@ -381,7 +381,7 @@ async def assign_task(
     if member_discord_id:
         member = await member_service.require_member(session, server_id, member_discord_id)
         candidate = next((c for c in evaluation.ranked if c.member_id == member.id), None)
-        mode = DecisionMode.MANUAL
+        mode = DecisionMode.LLM if decision_mode == DecisionMode.LLM else DecisionMode.MANUAL
         reasons = (
             list(candidate.reasons)
             if candidate

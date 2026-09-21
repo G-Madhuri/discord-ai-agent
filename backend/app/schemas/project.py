@@ -34,6 +34,7 @@ class ProjectUpdate(BaseModel):
 
 
 class ProjectMemberAdd(BaseModel):
+    context: ServerContext
     discord_user_id: str
     project_role: str | None = None
     allocation_percent: int = Field(default=100, ge=1, le=100)

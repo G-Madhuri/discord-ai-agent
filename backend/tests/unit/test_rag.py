@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from app.rag.chunking import ParagraphChunker
 from app.rag.embeddings import HashingEmbeddingProvider
 from app.rag.interfaces import KnowledgeScope
@@ -32,6 +34,7 @@ def test_chunker_ignores_empty_input():
     assert ParagraphChunker().split("   \n\n  ") == []
 
 
+@pytest.mark.asyncio
 async def test_hashing_embeddings_are_deterministic_and_normalised():
     provider = HashingEmbeddingProvider(dimension=64)
     first = await provider.embed_query("React dashboard")
@@ -42,6 +45,7 @@ async def test_hashing_embeddings_are_deterministic_and_normalised():
     assert abs(sum(v * v for v in first) ** 0.5 - 1.0) < 1e-9
 
 
+@pytest.mark.asyncio
 async def test_retrieval_finds_the_relevant_chunk():
     store = InMemoryVectorStore()
     scope = KnowledgeScope(server_id=uuid.uuid4(), project_id=uuid.uuid4())
@@ -61,6 +65,7 @@ async def test_retrieval_finds_the_relevant_chunk():
     assert "React" in hits[0].chunk.content
 
 
+@pytest.mark.asyncio
 async def test_retrieval_is_scoped_to_one_server():
     store = InMemoryVectorStore()
     project_id = uuid.uuid4()

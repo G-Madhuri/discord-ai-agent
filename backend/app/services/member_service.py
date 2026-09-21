@@ -34,8 +34,10 @@ async def get_or_create_user(session: AsyncSession, discord_user_id: str, userna
 async def get_member(
     session: AsyncSession, server_id: uuid.UUID, discord_user_id: str
 ) -> MemberProfile | None:
+    from sqlalchemy.orm import selectinload
     result = await session.execute(
         sa.select(MemberProfile)
+        .options(selectinload(MemberProfile.user), selectinload(MemberProfile.skills).selectinload(MemberSkill.skill))
         .join(User, User.id == MemberProfile.user_id)
         .where(MemberProfile.server_id == server_id, User.discord_user_id == discord_user_id)
     )
@@ -170,6 +172,7 @@ async def create_or_update_member(
 
     if payload.skills:
         await set_member_skills(session, member, payload.skills)
+    member.user = user
     return member
 
 

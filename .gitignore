@@ -28,6 +28,8 @@ htmlcov/
 *.sqlite3
 *.db
 local_data/
+*.log
+scratch/
 
 # Editors / OS
 .idea/

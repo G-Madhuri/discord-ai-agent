@@ -1,9 +1,13 @@
 .venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.ruff_cache/
 .git/
 .env
+__pycache__/
+*.pyc
+tests/
 docs/
+scratch/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+*.log
 *.sqlite3

@@ -23,12 +23,23 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
 def _engine_kwargs() -> dict:
-    kwargs: dict = {"echo": settings.db_echo, "pool_pre_ping": True, "future": True}
+    kwargs: dict = {
+        "echo": settings.db_echo,
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
+        "future": True,
+    }
     if settings.database_url.startswith("sqlite"):
         # SQLite (tests) has no server-side pool to size.
         return {"echo": settings.db_echo, "future": True}
     kwargs["pool_size"] = settings.db_pool_size
     kwargs["max_overflow"] = settings.db_max_overflow
+    if settings.database_url.startswith("postgresql"):
+        kwargs["connect_args"] = {
+            "ssl": "require",
+            "timeout": 30.0,  # 30s connection/auth timeout for Neon Postgres cold starts
+            "command_timeout": 30.0,
+        }
     return kwargs
 
 

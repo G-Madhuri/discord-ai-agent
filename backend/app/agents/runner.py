@@ -46,9 +46,9 @@ async def run_assignment(
     if settings.agent_mode == "llm":
         return await _run_llm(
             ctx.scoped(decision_mode=DecisionMode.LLM),
-            f"Assign {task_key}."
+            f"You MUST call the assign_task tool to assign {task_key}."
             + (f" Assign it to <@{member_discord_id}>." if member_discord_id else "")
-            + (" Reassign if it already has an assignee." if reassign else "")
+            + (" Set reassign=True to override existing assignment." if reassign else "")
             + (f" Note: {note}" if note else ""),
         )
 

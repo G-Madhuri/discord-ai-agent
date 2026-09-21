@@ -43,9 +43,9 @@ async def project_info(project_key: str, context: ServerContext, session: DbSess
 
 @router.post("/{project_key}/members", response_model=ProjectInfo, status_code=201)
 async def add_member(
-    project_key: str, payload: ProjectMemberAdd, context: ServerContext, session: DbSession
+    project_key: str, payload: ProjectMemberAdd, session: DbSession
 ) -> ProjectInfo:
-    server = await resolve_scoped_server(session, context)
+    server = await resolve_scoped_server(session, payload.context)
     project = await project_service.require_project(session, server.id, project_key)
     member = await member_service.require_member(session, server.id, payload.discord_user_id)
     await project_service.add_project_member(

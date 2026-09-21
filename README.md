@@ -70,17 +70,22 @@ curl http://localhost:8000/health
 `/readyz` reports whether the database is actually reachable, and
 `http://localhost:8000/docs` lists the API.
 
-### With a database
+### With a database (PostgreSQL)
 
-```bash
-docker compose -f infra/docker-compose.yml up -d db
+Set `DATABASE_URL` (pooled connection) and `DIRECT_URL` (direct host, bypassing PgBouncer transaction mode for Alembic DDL) in `.env`:
+
+```env
+DATABASE_URL=postgresql+asyncpg://user:password@host-pooler/dbname?ssl=require
+DIRECT_URL=postgresql+asyncpg://user:password@host/dbname?ssl=require
 ```
 
-Set `DATABASE_URL` in `.env`, then:
+Run Alembic migrations (uses `DIRECT_URL` automatically):
 
 ```bash
 cd backend && alembic upgrade head
 ```
+
+Seed the demo server:
 
 ```bash
 python scripts/seed_demo.py
@@ -93,19 +98,34 @@ flow can be exercised without Discord.
 ### Tests
 
 ```bash
-cd backend && pytest
+pytest
 ```
 
-Tests run on in-memory SQLite. No database, no Discord token and no Google
-credentials required.
+Runs the complete test suite (37+ baseline unit/integration tests and PostgreSQL schema constraint regression tests).
 
-### The bot
+### Run the Discord bot locally
 
-Put `DISCORD_BOT_TOKEN` in `.env` and run it alongside the API:
+1. Ensure `.env` contains your secrets and configurations:
+   ```env
+   DISCORD_BOT_TOKEN=your_discord_bot_token_here
+   DISCORD_APPLICATION_ID=your_discord_application_id_here
+   DISCORD_PUBLIC_KEY=your_discord_public_key_here
+   DISCORD_GUILD_ID=your_discord_guild_id_here
+   INTERNAL_API_TOKEN=your_internal_api_token_here
+   ```
 
-```bash
-cd backend && python -m app.discord.run_bot
-```
+2. Start the FastAPI backend:
+   ```bash
+   uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+   ```
+
+3. Start the Discord Gateway Bot process:
+   ```bash
+   python -m app.discord.bot
+   ```
+
+4. Invite the bot to your test Discord server using the OAuth2 URL:
+   [Bot Invite Link](https://discord.com/oauth2/authorize?client_id=1551280703633629266&permissions=68608&integration_type=0&scope=bot+applications.commands)
 
 ## Commands
 
@@ -133,6 +153,15 @@ hardcoded and `.env` is git-ignored.
 scoring engine decides and the service persists. `llm` puts Gemini in front of
 the same tools and the same persistence path.
 
+## Deploy to Cloud Run
+
+The application is deployed to Google Cloud Run with secret resolution via Secret Manager:
+
+- **Production Health URL**: `https://discord-agent-499979613721.us-central1.run.app/health`
+- **Discord Interactions URL**: `https://discord-agent-499979613721.us-central1.run.app/discord/interactions`
+
+For step-by-step instructions, container specs, IAM roles, and secret mappings, see [`docs/deploy.md`](docs/deploy.md).
+
 ## Layout
 
 ```
@@ -154,19 +183,13 @@ scripts/
 
 ## Status
 
-**Implemented:** data model, assignment engine and workflow, agent tool surface,
-knowledge/RAG pipeline, REST API, Discord command surface, plan guard, server
-isolation, audit trail, tests.
+**Implemented:** data model, assignment engine and workflow, agent tool surface, knowledge/RAG pipeline, REST API, Discord command surface (Gateway + HTTP Interactions), plan guard, server isolation, audit trail, Google Cloud Run deployment, Secret Manager integration, tests.
 
-**Not implemented yet:** project planning (guard only — deliberately), live
-Gemini/Vertex verification, live Discord verification, Discord HTTP interactions
-endpoint, ANN vector search, API authentication beyond the shared internal
-token. See [`docs/deployment.md`](docs/deployment.md).
+**Not implemented yet:** project planning (guard only — deliberately), Pinecone vector search, hybrid RAG tuning.
 
 ## Documentation
 
-* [Architecture](docs/architecture.md) — layers, isolation, why the LLM cannot
-  write to the database
-* [Assignment engine](docs/assignment.md) — the workflow, the scoring, what
-  gets stored for audit
-* [Deployment](docs/deployment.md) — the Cloud Run target and what is left
+* [Architecture](docs/architecture.md) — layers, isolation, why the LLM cannot write to the database
+* [Assignment engine](docs/assignment.md) — the workflow, the scoring, what gets stored for audit
+* [Discord Wiring](docs/discord.md) — slash commands, Gateway vs. HTTP Interactions, Ed25519 signature verification
+* [Cloud Run Deployment](docs/deploy.md) — GCP setup, Artifact Registry, Secret Manager mapping, container specs
