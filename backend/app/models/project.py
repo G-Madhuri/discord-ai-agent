@@ -47,6 +47,10 @@ class Project(Base, TimestampMixin):
 
     start_date: Mapped[date | None] = mapped_column(sa.Date)
     target_date: Mapped[date | None] = mapped_column(sa.Date)
+    deadline: Mapped[date | None] = mapped_column(sa.Date)
+    constraints: Mapped[str | None] = mapped_column(sa.Text)
+    plan_source: Mapped[str | None] = mapped_column(sa.String(50))
+    draft_assignments: Mapped[dict | None] = mapped_column(sa.JSON)
     metadata_json: Mapped[dict] = mapped_column("metadata", sa.JSON, default=dict, nullable=False)
 
     server: Mapped[Server] = relationship(back_populates="projects")
@@ -162,3 +166,37 @@ class DocumentChunk(Base, TimestampMixin):
     metadata_json: Mapped[dict] = mapped_column("metadata", sa.JSON, default=dict, nullable=False)
 
     document: Mapped[ProjectDocument] = relationship(back_populates="chunks")
+
+
+class ProjectDocumentExtraction(Base, TimestampMixin):
+    """Records LLM extraction artifacts from an uploaded document."""
+
+    __tablename__ = "project_document_extractions"
+    __table_args__ = (sa.Index("ix_doc_extractions_project", "project_id"),)
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("project_documents.id", ondelete="CASCADE")
+    )
+    extracted_tasks: Mapped[dict] = mapped_column(sa.JSON, default=dict, nullable=False)
+    extraction_notes: Mapped[str | None] = mapped_column(sa.Text)
+
+
+class ProjectPlanApproval(Base, TimestampMixin):
+    """Audit log of user approvals/rejections/edits for a project plan."""
+
+    __tablename__ = "project_plan_approvals"
+    __table_args__ = (sa.Index("ix_plan_approvals_project", "project_id"),)
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    approved_by_user_id: Mapped[str | None] = mapped_column(sa.String(64))
+    approved_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    action: Mapped[str] = mapped_column(sa.String(50), nullable=False)
+    feedback: Mapped[str | None] = mapped_column(sa.Text)
+

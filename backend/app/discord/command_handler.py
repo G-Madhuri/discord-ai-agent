@@ -96,18 +96,56 @@ async def handle_command(
                 lines = [f"• {d.title} ({d.source_type}, {d.chunk_count} chunks)" for d in docs]
                 return "**Project knowledge**\n" + "\n".join(lines), False
 
-        elif full_command in ("project member add", "project_member_add"):
+        elif full_command in ("project member add", "project_member_add", "project add-members", "project add_members"):
             project_key = (args.get("project") or args.get("project_key") or "").upper()
-            user_id = str(args.get("user") or args.get("user_id") or "")
+            user_id = str(args.get("user") or args.get("user_id") or args.get("user_ids") or "")
             project_role = args.get("role") or args.get("project_role")
             async with session_scope() as session:
                 server = await resolve_server(session, server_ctx)
                 project = await project_service.require_project(session, server.id, project_key)
-                member = await member_service.require_member(session, server.id, user_id)
-                await project_service.add_project_member(
-                    session, project, member, project_role=project_role
-                )
-                return f"✅ Member {user_id} added to project {project.key}.", False
+                
+                # Support comma-separated or space-separated user IDs
+                user_ids = [u.strip() for u in user_id.replace(",", " ").split() if u.strip()]
+                added_names = []
+                for uid in user_ids:
+                    try:
+                        member = await member_service.require_member(session, server.id, uid)
+                        await project_service.add_project_member(session, project, member, project_role=project_role)
+                        added_names.append(member.display_name)
+                    except Exception as exc:
+                        logger.warning("Failed to add user %s to project %s: %s", uid, project_key, exc)
+
+                # Re-run assignment on unassigned tasks for this project
+                unassigned_tasks = await task_service.list_tasks(session, server.id, project.id)
+                assigned_count = 0
+                for t in unassigned_tasks:
+                    eval_res = await assignment_service.evaluate_and_assign(session, server.id, t, auto_commit=True)
+                    if eval_res and eval_res.winner:
+                        assigned_count += 1
+
+                names_str = ", ".join(added_names) if added_names else user_id
+                return f"✅ Members ({names_str}) added to project **{project.key}**. {assigned_count} unassigned task(s) updated.", False
+
+        elif full_command in ("assign-project", "assign_project"):
+            project_key = (args.get("project") or args.get("project_key") or args.get("name") or "").upper()
+            async with session_scope() as session:
+                server = await resolve_server(session, server_ctx)
+                project = await project_service.require_project(session, server.id, project_key)
+                tasks = await task_service.list_tasks(session, server.id, project.id)
+                
+                lines = []
+                for t in tasks:
+                    eval_res = await assignment_service.evaluate_and_assign(session, server.id, t, auto_commit=True)
+                    if eval_res and eval_res.winner:
+                        m_name = eval_res.winner.member.display_name
+                        reason = eval_res.winner.evidence_bullets[0] if eval_res.winner.evidence_bullets else "match"
+                        lines.append(f"• `{t.key}` → **{m_name}** ({reason})")
+                    else:
+                        lines.append(f"• `{t.key}` → *unassigned* (no candidate)")
+
+                if not lines:
+                    return f"No tasks in project **{project.key}**.", False
+                return f"**Assignments for project {project.key}:**\n" + "\n".join(lines), False
 
         elif full_command == "task create":
             project_key = (args.get("project") or args.get("project_key") or "").upper()

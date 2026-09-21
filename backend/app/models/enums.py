@@ -4,6 +4,7 @@ from enum import StrEnum
 
 
 class ProjectStatus(StrEnum):
+    DRAFT = "draft"
     PLANNING = "planning"
     ACTIVE = "active"
     ON_HOLD = "on_hold"

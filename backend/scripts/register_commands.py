@@ -68,27 +68,21 @@ COMMANDS = [
         "options": [
             {
                 "name": "create",
-                "description": "Create a new project in this server",
+                "description": "Create a new project using agentic planning",
+                "type": 1,  # SUB_COMMAND
+                "options": [],  # No options -> triggers Discord Modal directly
+            },
+            {
+                "name": "add-members",
+                "description": "Add team members to an existing project",
                 "type": 1,  # SUB_COMMAND
                 "options": [
                     {
-                        "name": "name",
-                        "description": "Project name",
+                        "name": "project",
+                        "description": "Project key, e.g. PROJ",
                         "type": 3,
                         "required": True,
-                    },
-                    {
-                        "name": "description",
-                        "description": "Optional project description",
-                        "type": 3,
-                        "required": False,
-                    },
-                    {
-                        "name": "key",
-                        "description": "Optional project key",
-                        "type": 3,
-                        "required": False,
-                    },
+                    }
                 ],
             },
             {
@@ -149,6 +143,18 @@ COMMANDS = [
                     }
                 ],
             },
+        ],
+    },
+    {
+        "name": "assign-project",
+        "description": "Run assignment on all unassigned tasks in a project",
+        "options": [
+            {
+                "name": "project",
+                "description": "Project key, e.g. PROJ",
+                "type": 3,  # STRING
+                "required": True,
+            }
         ],
     },
     {
