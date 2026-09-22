@@ -498,5 +498,99 @@ async def test_approval_failure_patches_error_and_logs_error(caplog):
     assert any("Failed approving project TEST-PROJ" in rec.message for rec in error_logs)
 
 
+@pytest.mark.asyncio
+async def test_count_active_member_tasks(session):
+    """Bug 2 test: Assert count_active_member_tasks accurately counts active assignments."""
+    import uuid
+    from app.schemas.common import ServerContext
+    from app.schemas.member import MemberCreate
+    from app.schemas.project import ProjectCreate
+    from app.schemas.task import TaskCreate
+    from app.services import member_service, project_service, server_service, task_service
+    from app.services.assignment import service as assignment_service
+    from app.models.enums import DecisionMode
+
+    guild_id = f"guild_{uuid.uuid4().hex[:8]}"
+    s_ctx = ServerContext(discord_guild_id=guild_id)
+    server = await server_service.resolve_server(session, s_ctx, create=True)
+
+    project = await project_service.create_project(
+        session,
+        server.id,
+        ProjectCreate(context=s_ctx, key="PROJ-COUNT", name="Project Count"),
+    )
+
+    mem = await member_service.create_or_update_member(
+        session,
+        server.id,
+        MemberCreate(
+            context=s_ctx,
+            discord_user_id=f"user_{uuid.uuid4().hex[:6]}",
+            username="test_member",
+            display_name="Test Member",
+            role="Backend Engineer",
+        ),
+    )
+
+    cnt0 = await task_service.count_active_member_tasks(session, mem.id)
+    assert cnt0 == 0
+
+    for i in range(3):
+        t = await task_service.create_task(
+            session,
+            server.id,
+            project,
+            TaskCreate(
+                context=s_ctx,
+                project_key=project.key,
+                key=f"TASK-COUNT-{i+1}",
+                title=f"Count Task {i+1}",
+            ),
+        )
+        from app.models.assignment import Assignment
+        from app.models.enums import AssignmentStatus
+        session.add(
+            Assignment(
+                server_id=server.id,
+                project_id=project.id,
+                task_id=t.id,
+                member_profile_id=mem.id,
+                status=AssignmentStatus.ACTIVE,
+                decision_mode=DecisionMode.DETERMINISTIC,
+            )
+        )
+        await session.commit()
+
+    cnt3 = await task_service.count_active_member_tasks(session, mem.id)
+    assert cnt3 == 3
+
+
+def test_split_text_into_chunks_with_30_tasks():
+    """Bug 1 test: Assert summary with 30 tasks splits into chunks of <= 2000 chars."""
+    from app.api.routes.discord import split_text_into_chunks
+
+    task_lines = [
+        f"• `TASK-{i:03d}` — Long task title description for task number {i:03d} → <@123456789{i:02d}>"
+        for i in range(1, 31)
+    ]
+    tasks_summary = "\n".join(task_lines)
+    content = (
+        f"📋 Project **Massive System Migration** (`MIGRATE-30`) drafted (not yet active)\n\n"
+        f"**Plan:** 30 task(s) (llm_inferred)\n"
+        f"**Team:** <@123456789>\n\n"
+        f"**Tasks & Draft Assignments:**\n{tasks_summary}\n\n"
+        f"**Constraints Considered:**\n• None\n\n"
+        f"_Reply with `/assignment history TASK-XXX` to see evidence per task._\n\n"
+        f"Click **Approve ✅** to activate this project & commit assignments, **Reject ❌** to discard, or **Edit ✏️** to adjust."
+    )
+
+    assert len(content) > 2000
+    chunks = split_text_into_chunks(content, max_chars=1900)
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        assert len(chunk) <= 2000
+
+
+
 
 

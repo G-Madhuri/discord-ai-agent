@@ -120,6 +120,41 @@ async def _execute_and_patch(
         logger.error("Failed to send Discord webhook PATCH for %s: %s", full_command, exc)
 
 
+def split_text_into_chunks(text: str, max_chars: int = 1900) -> list[str]:
+    """Split text into chunks of <= max_chars, breaking on newline boundaries where possible."""
+    if len(text) <= max_chars:
+        return [text]
+
+    lines = text.split("\n")
+    chunks: list[str] = []
+    current_chunk: list[str] = []
+    current_len = 0
+
+    for line in lines:
+        if len(line) > max_chars:
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+                current_chunk = []
+                current_len = 0
+            for i in range(0, len(line), max_chars):
+                chunks.append(line[i : i + max_chars])
+            continue
+
+        line_len = len(line) + 1
+        if current_len + line_len > max_chars and current_chunk:
+            chunks.append("\n".join(current_chunk))
+            current_chunk = [line]
+            current_len = line_len
+        else:
+            current_chunk.append(line)
+            current_len += line_len
+
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+
+    return chunks
+
+
 async def _execute_and_patch_project_plan(
     application_id: str,
     token: str,
@@ -154,19 +189,18 @@ async def _execute_and_patch_project_plan(
         team_ids = res["team_discord_ids"]
         team_str = ", ".join(f"<@{uid}>" for uid in team_ids) if team_ids else "None"
 
-        # Build task assignment bullet points
+        # Build task assignment bullet points (one line per task, no inline evidence)
         task_lines = []
         for key, item in draft_assignments.items():
             t_title = item["task_title"]
             m_name = item["assigned_display_name"]
-            m_uid = item["assigned_discord_user_id"]
+            m_uid = item.get("assigned_discord_user_id")
             m_mention = f"<@{m_uid}>" if m_uid else f"**{m_name}**"
-            evidence = "; ".join(item["evidence_bullets"][:2]) if item.get("evidence_bullets") else "skill match"
-            task_lines.append(f"• `{key}` — {t_title} → {m_mention}\n  *Evidence: {evidence}*")
+            task_lines.append(f"• `{key}` — {t_title} → {m_mention}")
 
-        tasks_summary = "\n".join(task_lines[:15])
-        if len(task_lines) > 15:
-            tasks_summary += f"\n*...and {len(task_lines) - 15} more tasks.*"
+        tasks_summary = "\n".join(task_lines[:40])
+        if len(task_lines) > 40:
+            tasks_summary += f"\n*...and {len(task_lines) - 40} more tasks.*"
 
         constraints_summary = f"• {constraints}" if constraints else "• None"
 
@@ -176,10 +210,10 @@ async def _execute_and_patch_project_plan(
             f"**Team:** {team_str}\n\n"
             f"**Tasks & Draft Assignments:**\n{tasks_summary}\n\n"
             f"**Constraints Considered:**\n{constraints_summary}\n\n"
+            f"_Reply with `/assignment history TASK-XXX` to see evidence per task._\n\n"
             f"Click **Approve ✅** to activate this project & commit assignments, **Reject ❌** to discard, or **Edit ✏️** to adjust."
         )
 
-        # Build interactive Discord ActionRow with 3 Buttons (Approve ✅, Reject ❌, Edit ✏️)
         components = [
             {
                 "type": 1,
@@ -206,18 +240,36 @@ async def _execute_and_patch_project_plan(
             }
         ]
 
-        patch_body = {"content": content, "components": components}
+        chunks = split_text_into_chunks(content, max_chars=1900)
+        logger.info("Plan summary length: %d chars; sending split in %d chunk(s)", len(content), len(chunks))
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            first_body = {"content": chunks[0], "components": components}
+            resp = await client.patch(webhook_url, json=first_body)
+            if resp.status_code >= 400:
+                logger.error("PATCH failed: status=%d body=%s", resp.status_code, resp.text)
+            else:
+                logger.info("Outbound plan summary PATCH for %s -> HTTP %s", name, resp.status_code)
+
+            followup_url = f"https://discord.com/api/v10/webhooks/{application_id}/{token}"
+            for i, chunk in enumerate(chunks[1:], start=2):
+                post_body = {"content": chunk}
+                resp_post = await client.post(followup_url, json=post_body)
+                if resp_post.status_code >= 400:
+                    logger.error("Follow-up POST %d failed: status=%d body=%s", i, resp_post.status_code, resp_post.text)
+                else:
+                    logger.info("Follow-up POST %d for %s -> HTTP %s", i, name, resp_post.status_code)
 
     except Exception as exc:
         logger.exception("Failed to execute agentic project planner for %s", name)
         patch_body = {"content": f"⚠️ Project planning failed: {exc}", "flags": 64}
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.patch(webhook_url, json=patch_body)
-            logger.info("Outbound plan summary PATCH for %s -> HTTP %s", name, resp.status_code)
-    except Exception as exc:
-        logger.error("Failed to send plan summary PATCH for %s: %s", name, exc)
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.patch(webhook_url, json=patch_body)
+                if resp.status_code >= 400:
+                    logger.error("PATCH failed: status=%d body=%s", resp.status_code, resp.text)
+        except Exception as patch_exc:
+            logger.error("Failed to send planning error PATCH for %s: %s", name, patch_exc)
 
 
 async def _execute_and_patch_approve_project(
