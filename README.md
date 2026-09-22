@@ -153,14 +153,14 @@ hardcoded and `.env` is git-ignored.
 scoring engine decides and the service persists. `llm` puts Gemini in front of
 the same tools and the same persistence path.
 
-## Deploy on Railway
+## Deployment
 
-The application is deployed on [Railway](https://railway.app/) using containerized runtime deployment:
+The codebase is fully portable between **Google Cloud Run** and **Railway**. Choose your preferred deployment target:
 
-- **Deployment Configuration**: Set up via `railway.json` at repo root.
-- **Discord Interaction Webhook Endpoint**: `https://<YOUR_RAILWAY_URL>/discord/interactions`
+- **[Google Cloud Run Deployment Guide](docs/cloud-run-deploy.md)** (Low latency, `--no-cpu-throttling`, Secret Manager integration)
+- **[Railway Deployment Guide](docs/railway-deploy.md)** (Container deployment with hard budget limits)
 
-For step-by-step Railway deployment setup, environment variable configuration, hard budget limits, and Discord Developer Portal integration, see [`docs/railway-deploy.md`](docs/railway-deploy.md).
+Both deployment targets utilize the same Dockerfile, FastAPI application engine, and Neon PostgreSQL database.
 
 ## Layout
 
