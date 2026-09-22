@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -51,6 +51,7 @@ class Project(Base, TimestampMixin):
     constraints: Mapped[str | None] = mapped_column(sa.Text)
     plan_source: Mapped[str | None] = mapped_column(sa.String(50))
     draft_assignments: Mapped[dict | None] = mapped_column(sa.JSON)
+    created_by_user_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     metadata_json: Mapped[dict] = mapped_column("metadata", sa.JSON, default=dict, nullable=False)
 
     server: Mapped[Server] = relationship(back_populates="projects")
@@ -134,12 +135,13 @@ class ProjectDocument(Base, TimestampMixin):
     )
 
 
-class DocumentChunk(Base, TimestampMixin):
-    """A retrievable slice of a ProjectDocument plus its embedding.
+from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects.postgresql import TSVECTOR
 
-    The embedding is stored as a JSON float array so the schema works on plain
-    PostgreSQL. Swapping in pgvector or Vertex AI Vector Search means replacing
-    the VectorStore implementation, not the domain code (see app/rag).
+
+class DocumentChunk(Base, TimestampMixin):
+    """A retrievable slice of a ProjectDocument plus its pgvector embedding (768-dim)
+    and full-text tsvector search column.
     """
 
     __tablename__ = "document_chunks"
@@ -161,7 +163,14 @@ class DocumentChunk(Base, TimestampMixin):
     chunk_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     content: Mapped[str] = mapped_column(sa.Text, nullable=False)
     token_estimate: Mapped[int] = mapped_column(sa.Integer, default=0, nullable=False)
-    embedding: Mapped[list | None] = mapped_column(sa.JSON)
+    embedding: Mapped[Any | None] = mapped_column(
+        Vector(768).with_variant(sa.JSON(), "sqlite"), nullable=True
+    )
+    text_search: Mapped[Any | None] = mapped_column(
+        TSVECTOR().with_variant(sa.Text(), "sqlite"),
+        server_default=sa.FetchedValue(),
+        nullable=True,
+    )
     embedding_model: Mapped[str | None] = mapped_column(sa.String(100))
     metadata_json: Mapped[dict] = mapped_column("metadata", sa.JSON, default=dict, nullable=False)
 

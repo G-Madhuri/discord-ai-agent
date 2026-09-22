@@ -283,6 +283,7 @@ def _excerpt(content: str, limit: int = 220) -> str:
 
 
 def _build_reasons(
+    task: TaskInput,
     matched: Sequence[SkillEvidence],
     missing: Sequence[SkillEvidence],
     role_match: str,
@@ -294,6 +295,9 @@ def _build_reasons(
 ) -> list[str]:
     """Short, factual bullet points — exactly what Discord shows."""
     reasons: list[str] = []
+
+    if task.requirements and not matched:
+        reasons.append("⚠️ Assigned via workload fallback (no skill match)")
 
     if matched:
         names = ", ".join(m.name for m in matched[:4])
@@ -395,6 +399,7 @@ def evaluate_candidates(data: EvaluationInput) -> AssignmentEvaluation:
                     availability=str(candidate.availability),
                 ),
                 reasons=_build_reasons(
+                    data.task,
                     matched,
                     missing,
                     role_match,

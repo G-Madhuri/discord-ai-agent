@@ -9,6 +9,9 @@ WORKDIR /app
 # Copy dependency definitions and install
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m nltk.downloader punkt punkt_tab -d /usr/share/nltk_data
+
+ENV NLTK_DATA=/usr/share/nltk_data
 
 # Copy application source code
 COPY backend /app/backend

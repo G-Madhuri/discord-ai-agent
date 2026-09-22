@@ -1,90 +1,44 @@
-# Deployment (Google Cloud)
+# Deployment Overview
 
-**Nothing is deployed yet.** This is the intended target and the configuration
-that exists to support it.
+The **TaskPilot Discord AI Agent** is configured for deployment on [Railway](https://railway.app/) using containerized runtime deployment.
 
 ```
-Cloud Run (FastAPI + agent)
+Railway Container (FastAPI + Discord Interactions Agent)
   ↓
-Vertex AI / Gemini
+Neon PostgreSQL (Async Driver + pgvector)
   ↓
-Cloud SQL for PostgreSQL
-  ↓
-Project knowledge (chunks + vectors in PostgreSQL)
+Google Vertex AI (Gemini 2.5 Flash + Text Embeddings)
 ```
 
-## Secrets
+---
 
-No service-account JSON file is created or needed.
+## 🚀 Active Deployment Target: Railway
 
-* **Cloud Run** uses its attached service account for Vertex AI —
-  Application Default Credentials, no key file.
-* **Everything else** (Discord token, database URL) lives in **Secret Manager**
-  and is injected as an environment variable with `--set-secrets`. The
-  application reads plain environment variables, so no Secret Manager client
-  code is required.
+For full step-by-step instructions on setting up Railway continuous deployment, configuring environment variables, setting budget limits, and linking Discord interaction webhooks, please refer to:
 
-```bash
-printf '%s' "$DISCORD_TOKEN" | gcloud secrets create discord-bot-token --data-file=-
-printf '%s' "$DB_URL"        | gcloud secrets create database-url      --data-file=-
-```
+👉 **[Railway Deployment Guide](railway-deploy.md)**
 
-Grant the runtime service account `roles/secretmanager.secretAccessor`,
-`roles/aiplatform.user` and `roles/cloudsql.client`.
+---
 
-## Build and deploy
+## 🔐 Environment Variables & Secrets
 
-```bash
-gcloud builds submit --tag gcr.io/$PROJECT/discord-assignment-agent
-```
+Environment variables are passed directly into the container via Railway's dashboard (or `.env` in local development).
 
-```bash
-gcloud run deploy discord-assignment-agent \
-  --image gcr.io/$PROJECT/discord-assignment-agent \
-  --region $REGION \
-  --no-allow-unauthenticated \
-  --add-cloudsql-instances $PROJECT:$REGION:$INSTANCE \
-  --set-env-vars ENVIRONMENT=production,GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$PROJECT,GOOGLE_CLOUD_LOCATION=$REGION,AGENT_MODE=llm,EMBEDDING_PROVIDER=vertex,VECTOR_STORE=postgres \
-  --set-secrets DATABASE_URL=database-url:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest,INTERNAL_API_TOKEN=internal-api-token:latest
-```
+Key runtime variables include:
+- `DATABASE_URL` / `DIRECT_URL`: Neon PostgreSQL connection strings with `ssl=require`.
+- `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION`: Google Vertex AI platform settings.
+- `DISCORD_BOT_TOKEN` / `DISCORD_PUBLIC_KEY`: Discord application credentials and Ed25519 signature verification key.
+- `INTERNAL_API_TOKEN`: Shared token for internal backend endpoints.
 
-Notes:
+See [`.env.example`](../.env.example) for a complete template.
 
-* The container reads `PORT` from Cloud Run; the Dockerfile already does.
-* Keep the service private (`--no-allow-unauthenticated`). `INTERNAL_API_TOKEN`
-  is a second layer, not the only one.
-* Over a Cloud SQL unix socket the URL is
-  `postgresql+asyncpg://USER:PASS@/DB?host=/cloudsql/PROJECT:REGION:INSTANCE`.
+---
 
-## The Discord bot process
+## 📜 Historical Reference: Google Cloud Run
 
-`discord.py` holds a persistent gateway websocket, which does not fit Cloud
-Run's request-scoped model. Two options, neither implemented yet:
-
-1. **Cloud Run with `--min-instances=1` and `--no-cpu-throttling`**, running
-   `python -m app.discord.run_bot` as a second service. Simple; costs one
-   always-on instance.
-2. **Discord HTTP interactions** — Discord POSTs signed interaction payloads to
-   an endpoint, which suits Cloud Run's scale-to-zero. This needs Ed25519
-   signature verification using `DISCORD_PUBLIC_KEY`; the variable is reserved
-   for it, the verification is **not written yet**.
-
-Start with option 1.
-
-## Migrations
-
-Alembic does not run automatically at startup. Run it as a one-off job (Cloud
-Run job or Cloud Build step) before promoting a new revision:
-
-```bash
-alembic upgrade head
-```
-
-## Before production
-
-- [ ] Generate and review the initial migration against PostgreSQL
-- [ ] Switch `EMBEDDING_PROVIDER` to `vertex` and re-ingest existing documents
-      (hashed dev vectors are not comparable with Vertex ones)
-- [ ] Decide the bot hosting option above
-- [ ] Replace the in-Python similarity search if a project's corpus grows past
-      a few thousand chunks (see `app/rag/stores/postgres.py`)
+> [!NOTE]
+> The service was originally deployed on Google Cloud Run. While Cloud Run provides robust scale-to-zero capabilities, its default CPU throttling after HTTP responses complete caused background execution delays for long-running LLM project planning and RAG embedding workflows. Disabling CPU throttling required continuous baseline container allocation (`--no-cpu-throttling --min-instances=1`), incurring ~$45/month in baseline hosting costs.
+>
+> Railway was chosen for active deployment to eliminate background CPU throttling while maintaining low costs with serverless sleeping and hard budget limits.
+>
+> For historical GCP Cloud Run deployment configurations and IAM permissions, see [`docs/archive/gcp-deploy.md`](archive/gcp-deploy.md).

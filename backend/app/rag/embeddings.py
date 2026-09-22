@@ -1,16 +1,17 @@
 """Embedding providers.
 
-`hashing` is a dependency-free, deterministic bag-of-words projection used for
-local development and tests. It is lexical, not semantic — it will match
-'React' to 'React', not to 'frontend library'. It exists so the whole pipeline
-is runnable offline; production sets EMBEDDING_PROVIDER=vertex.
+VertexEmbeddingProvider uses Google Vertex AI (text-embedding-004, 768 dimensions)
+with batching (up to 50 texts per call) and exponential backoff retry.
+HashingEmbeddingProvider remains available as a deterministic offline fallback for local tests.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 import re
+from typing import Any
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -59,16 +60,16 @@ class HashingEmbeddingProvider:
 
 
 class VertexEmbeddingProvider:
-    """Vertex AI text embeddings.
+    """Vertex AI text-embedding-004 embeddings (768 dimensions) using google.genai client.
 
-    The SDK is imported lazily so the application starts without Google
-    credentials when EMBEDDING_PROVIDER is not 'vertex'.
+    Batches up to 50 chunks per API call and retries up to 3 times with exponential backoff.
+    Fails loud on repeated failure without fallback to hashing.
     """
 
     def __init__(self, model_name: str | None = None, dimension: int | None = None) -> None:
-        self._model_name = model_name or settings.embedding_model
+        self._model_name = model_name or settings.rag_embedding_model
         self._dimension = dimension or settings.embedding_dimension
-        self._model = None
+        self._client: Any = None
 
     @property
     def model_name(self) -> str:
@@ -78,41 +79,71 @@ class VertexEmbeddingProvider:
     def dimension(self) -> int:
         return self._dimension
 
-    def _get_model(self):
-        if self._model is None:
-            import vertexai
-            from vertexai.language_models import TextEmbeddingModel
+    def _get_client(self) -> Any:
+        if self._client is None:
+            from google import genai
 
             if not settings.google_cloud_project:
                 raise RuntimeError("GOOGLE_CLOUD_PROJECT must be set to use Vertex embeddings")
-            vertexai.init(
-                project=settings.google_cloud_project, location=settings.google_cloud_location
+            self._client = genai.Client(
+                vertexai=settings.google_genai_use_vertexai,
+                project=settings.google_cloud_project,
+                location=settings.google_cloud_location,
             )
-            self._model = TextEmbeddingModel.from_pretrained(self._model_name)
-        return self._model
+        return self._client
 
-    async def _embed_batch(self, texts: list[str], task_type: str) -> list[list[float]]:
-        import asyncio
+    async def _embed_batch_with_retry(self, texts: list[str]) -> list[list[float]]:
+        client = self._get_client()
 
-        from vertexai.language_models import TextEmbeddingInput
+        def _call_embed():
+            resp = client.models.embed_content(
+                model=self._model_name,
+                contents=texts,
+            )
+            if not resp or not resp.embeddings:
+                raise RuntimeError(
+                    f"Vertex AI embed_content returned empty response for model {self._model_name}"
+                )
+            return [list(emb.values) for emb in resp.embeddings]
 
-        model = self._get_model()
-        inputs = [TextEmbeddingInput(text=t, task_type=task_type) for t in texts]
-        # The Vertex SDK call is synchronous; keep the event loop free.
-        result = await asyncio.to_thread(model.get_embeddings, inputs)
-        return [list(item.values) for item in result]
+        max_attempts = 3
+        backoff = 1.0
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, _call_embed)
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Vertex AI embed_content attempt %d/%d failed: %s", attempt, max_attempts, exc
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(backoff)
+                    backoff *= 2.0
+
+        raise RuntimeError(
+            f"Vertex AI embedding failed after {max_attempts} attempts: {last_exc}"
+        ) from last_exc
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        return await self._embed_batch(texts, "RETRIEVAL_DOCUMENT")
+        batch_size = 50
+        all_embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            batch_vecs = await self._embed_batch_with_retry(batch)
+            all_embeddings.extend(batch_vecs)
+        return all_embeddings
 
     async def embed_query(self, text: str) -> list[float]:
-        vectors = await self._embed_batch([text], "RETRIEVAL_QUERY")
-        return vectors[0]
+        results = await self._embed_batch_with_retry([text])
+        return results[0]
 
 
 def get_embedding_provider():
-    if settings.embedding_provider == "vertex":
-        return VertexEmbeddingProvider()
+    if settings.embedding_provider == "vertex" or settings.rag_vector_store == "postgres":
+        if settings.google_cloud_project:
+            return VertexEmbeddingProvider()
     return HashingEmbeddingProvider()

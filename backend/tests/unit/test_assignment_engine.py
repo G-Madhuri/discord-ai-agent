@@ -85,6 +85,28 @@ def test_picks_the_member_whose_skills_match_the_task():
     assert result.best.score > result.ranked[1].score
 
 
+def test_workload_fallback_when_no_skill_matches():
+    """Issue 1: Task requires Rust. Members have only Python and React.
+    Assert task IS assigned to one of them, with the workload-fallback warning in evidence.
+    """
+    rust_task = TaskInput(
+        key="TASK-RUST",
+        title="Implement Rust core module",
+        description="High performance Rust library",
+        requirements=(SkillRequirement(slug="rust", name="Rust", weight=1.0),),
+    )
+    members = (
+        candidate("Alice", role="Python Dev", skills=(skill("python", "Python", 5),), active_task_keys=("T-1",)),
+        candidate("Bob", role="React Dev", skills=(skill("react", "React", 5),), active_task_keys=()),
+    )
+    result = evaluate(rust_task, members)
+
+    assert result.best is not None
+    # Bob has lower active task count (0 vs 1), so Bob wins tiebreaker
+    assert result.best.display_name == "Bob"
+    assert "⚠️ Assigned via workload fallback (no skill match)" in result.best.reasons
+
+
 def test_every_candidate_is_scored_and_explained():
     result = evaluate(dashboard_task(), team())
 

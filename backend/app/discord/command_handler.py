@@ -104,6 +104,13 @@ async def handle_command(
                 server = await resolve_server(session, server_ctx)
                 project = await project_service.require_project(session, server.id, project_key)
                 
+                # Check creator authorization (Issue 2)
+                creator_id = project.created_by_user_id
+                req_uid = server_ctx.requested_by_discord_id
+                if not creator_id or creator_id == "<legacy>" or creator_id != req_uid:
+                    c_text = f"<@{creator_id}>" if creator_id and creator_id != "<legacy>" else "project creator"
+                    return f"⚠️ Only the project creator ({c_text}) can do this.", True
+
                 # Support comma-separated or space-separated user IDs
                 user_ids = [u.strip() for u in user_id.replace(",", " ").split() if u.strip()]
                 added_names = []
@@ -119,9 +126,16 @@ async def handle_command(
                 unassigned_tasks = await task_service.list_tasks(session, server.id, project.id)
                 assigned_count = 0
                 for t in unassigned_tasks:
-                    eval_res = await assignment_service.evaluate_and_assign(session, server.id, t, auto_commit=True)
-                    if eval_res and eval_res.winner:
+                    try:
+                        await assignment_service.assign_task(
+                            session,
+                            server_id=server.id,
+                            task_key=t.key,
+                            requested_by_discord_id=req_uid,
+                        )
                         assigned_count += 1
+                    except Exception as exc:
+                        logger.warning("Failed assigning %s: %s", t.key, exc)
 
                 names_str = ", ".join(added_names) if added_names else user_id
                 return f"✅ Members ({names_str}) added to project **{project.key}**. {assigned_count} unassigned task(s) updated.", False
@@ -131,17 +145,30 @@ async def handle_command(
             async with session_scope() as session:
                 server = await resolve_server(session, server_ctx)
                 project = await project_service.require_project(session, server.id, project_key)
+
+                # Check creator authorization (Issue 2)
+                creator_id = project.created_by_user_id
+                req_uid = server_ctx.requested_by_discord_id
+                if not creator_id or creator_id == "<legacy>" or creator_id != req_uid:
+                    c_text = f"<@{creator_id}>" if creator_id and creator_id != "<legacy>" else "project creator"
+                    return f"⚠️ Only the project creator ({c_text}) can do this.", True
+
                 tasks = await task_service.list_tasks(session, server.id, project.id)
                 
                 lines = []
                 for t in tasks:
-                    eval_res = await assignment_service.evaluate_and_assign(session, server.id, t, auto_commit=True)
-                    if eval_res and eval_res.winner:
-                        m_name = eval_res.winner.member.display_name
-                        reason = eval_res.winner.evidence_bullets[0] if eval_res.winner.evidence_bullets else "match"
+                    try:
+                        res = await assignment_service.assign_task(
+                            session,
+                            server_id=server.id,
+                            task_key=t.key,
+                            requested_by_discord_id=req_uid,
+                        )
+                        m_name = res.assignment.member_display_name
+                        reason = res.reasons[0] if res.reasons else "match"
                         lines.append(f"• `{t.key}` → **{m_name}** ({reason})")
-                    else:
-                        lines.append(f"• `{t.key}` → *unassigned* (no candidate)")
+                    except Exception as exc:
+                        lines.append(f"• `{t.key}` → *unassigned* ({exc})")
 
                 if not lines:
                     return f"No tasks in project **{project.key}**.", False
@@ -245,6 +272,14 @@ async def handle_command(
             reassign = bool(args.get("reassign", False))
             async with session_scope() as session:
                 server = await resolve_server(session, server_ctx)
+                if reassign:
+                    task = await task_service.require_task(session, server.id, task_key)
+                    proj = await session.get(Project, task.project_id)
+                    creator_id = proj.created_by_user_id if proj else None
+                    req_uid = server_ctx.requested_by_discord_id
+                    if not creator_id or creator_id == "<legacy>" or creator_id != req_uid:
+                        c_text = f"<@{creator_id}>" if creator_id and creator_id != "<legacy>" else "project creator"
+                        return f"⚠️ Only the project creator ({c_text}) can do this.", True
 
             ctx = tool_context_from(server, server_ctx, project_key.upper() if project_key else None)
             reply = await run_assignment(

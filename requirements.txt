@@ -12,6 +12,8 @@ httpx>=0.28,<1
 SQLAlchemy[asyncio]>=2.0.36,<3
 asyncpg>=0.30,<0.31
 alembic>=1.14,<2
+pgvector>=0.3.0
+
 
 # --- Discord ---
 discord.py>=2.4,<3
@@ -20,7 +22,10 @@ pynacl>=1.5.0
 # --- AI agent (Google ADK + Gemini via Vertex AI) ---
 google-adk>=2.9,<3
 google-cloud-aiplatform>=1.95.1
+google-genai>=0.3.0
 
-# --- Document Parsing (Phase 6) ---
+# --- Document Parsing & Chunking (Phase 6) ---
 pypdf>=5.0.0
 python-docx>=1.1.0
+nltk>=3.9.0
+

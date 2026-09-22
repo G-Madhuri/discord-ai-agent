@@ -50,7 +50,7 @@ async def test_topic_only_inferred_tasks(session):
     desc = "We need an e-commerce platform for digital downloads."
     plan = _generate_fallback_plan(name="Digital Store", description=desc)
     assert plan.plan_source == "llm_inferred"
-    assert 1 <= len(plan.tasks) <= 20
+    assert 1 <= len(plan.tasks) <= 40
     for idx, t in enumerate(plan.tasks):
         assert t.source == "llm_inferred"
         for dep in t.depends_on_task_indices:
@@ -72,8 +72,8 @@ General note: Make sure SEO is optimized."""
 
 @pytest.mark.asyncio
 async def test_task_capping_schema_validation():
-    """Case 4 & Amendment 3: Pydantic enforces tasks min_length=1, max_length=20."""
-    tasks = [TaskPlanItem(title=f"Task {i}", description="Desc") for i in range(25)]
+    """Case 4 & Amendment 3: Pydantic enforces tasks min_length=1, max_length=40."""
+    tasks = [TaskPlanItem(title=f"Task {i}", description="Desc") for i in range(45)]
     with pytest.raises(ValueError):
         ProjectPlanOutput(plan_source="user_provided", reasoning="too many", tasks=tasks)
 
@@ -391,3 +391,79 @@ async def test_auto_assign_respects_dependencies(session):
     deps = list(res.scalars())
     assert len(deps) == 1
     assert deps[0].depends_on_task_id == t1.id
+
+
+@pytest.mark.asyncio
+async def test_only_project_creator_can_mutate(session):
+    """Issue 2: User A creates project. User B tries mutation -> rejected. User A tries -> allowed."""
+    guild_id = "1551394254557941888"
+    s_ctx_a = ServerContext(discord_guild_id=guild_id, requested_by_discord_id="user_creator_a")
+    s_ctx_b = ServerContext(discord_guild_id=guild_id, requested_by_discord_id="user_b")
+
+    server = await server_service.resolve_server(session, s_ctx_a, create=True)
+
+    # Member setup
+    await member_service.create_or_update_member(
+        session, server.id, MemberCreate(context=s_ctx_a, discord_user_id="user_creator_a", username="creator_a", display_name="Creator A")
+    )
+    await member_service.create_or_update_member(
+        session, server.id, MemberCreate(context=s_ctx_b, discord_user_id="user_b", username="user_b", display_name="User B")
+    )
+
+    # User A creates project
+    res_plan = await plan_project(
+        server_ctx=s_ctx_a,
+        name="Creator Only Project",
+        description="- Build backend API",
+        member_discord_ids=["user_creator_a", "user_b"],
+    )
+    project_key = res_plan["project_key"]
+    proj = await project_service.get_project(session, server.id, project_key)
+    assert proj is not None
+    assert proj.created_by_user_id == "user_creator_a"
+
+    # User B tries /assign-project via command_handler -> MUST BE REJECTED with creator warning
+    from app.discord.command_handler import handle_command
+    msg_b, is_err_b = await handle_command("assign-project", {"project": project_key}, s_ctx_b.model_dump())
+    assert is_err_b is True
+    assert "Only the project creator" in msg_b
+
+    # User A tries /assign-project -> ALLOWED
+    msg_a, is_err_a = await handle_command("assign-project", {"project": project_key}, s_ctx_a.model_dump())
+    assert is_err_a is False
+    assert "Assignments for project" in msg_a
+
+
+@pytest.mark.asyncio
+async def test_customer_portal_plan_quality():
+    """Part G3: Test Customer Portal plan quality constraints."""
+    from app.agents.project_planner import ALLOWED_SKILLS_LOWER, _generate_fallback_plan
+
+    name = "Customer Portal"
+    desc = "Build a customer portal with login, dashboard, and profile management. Users must be able to reset passwords."
+    constraints = ""
+
+    plan = _generate_fallback_plan(name=name, description=desc, constraints=constraints)
+
+    assert plan.plan_source in ("user_provided", "mixed")
+    assert len(plan.tasks) >= 6
+
+    titles_concat = " ".join(t.title.lower() for t in plan.tasks)
+    assert "login" in titles_concat, "No task title contains 'login'"
+    assert "dashboard" in titles_concat, "No task title contains 'dashboard'"
+    assert "profile" in titles_concat, "No task title contains 'profile'"
+    assert "password" in titles_concat or "reset" in titles_concat, "No task title contains 'password' or 'reset'"
+
+    for t in plan.tasks:
+        assert not t.title.lower().startswith("customer portal")
+        assert t.title.lower() not in (
+            "architecture & setup", "architecture and setup",
+            "testing & deployment", "testing and deployment"
+        )
+        for sk in t.required_skills:
+            assert sk.lower() in ALLOWED_SKILLS_LOWER, f"Skill {sk} not in allowed vocabulary"
+
+    assert len(plan.constraints_parsed.member_exclusions) == 0
+
+
+

@@ -46,3 +46,45 @@ async def debug_db_ping() -> dict[str, Any]:
         return {"ok": True, "result": val, "latency_seconds": round(elapsed, 3)}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
+
+
+@router.get("/debug/llm-ping", dependencies=[Depends(verify_internal_token)])
+async def debug_llm_ping() -> dict[str, Any]:
+    import asyncio
+    import traceback
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(
+            vertexai=settings.google_genai_use_vertexai,
+            project=settings.google_cloud_project,
+            location=settings.google_cloud_location,
+        )
+
+        async def _call():
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    model=settings.gemini_model,
+                    contents='Return JSON: {"ok": true}',
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.0,
+                    ),
+                ),
+            )
+
+        resp = await asyncio.wait_for(_call(), timeout=15.0)
+        raw_text = resp.text or ""
+        return {"ok": True, "raw": raw_text, "model": settings.gemini_model}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "traceback": traceback.format_exc(),
+        }
+

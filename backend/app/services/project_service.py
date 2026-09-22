@@ -95,6 +95,7 @@ async def create_project(
         start_date=payload.start_date,
         target_date=payload.target_date,
         discord_channel_id=payload.context.discord_channel_id,
+        created_by_user_id=payload.context.requested_by_discord_id,
     )
     session.add(project)
     await session.flush()

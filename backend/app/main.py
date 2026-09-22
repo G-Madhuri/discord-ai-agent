@@ -27,6 +27,12 @@ async def lifespan(app: FastAPI):
         settings.vector_store,
         settings.embedding_provider,
     )
+    logger.info(
+        "ENV | project=%s location=%s vertexai=%s",
+        settings.google_cloud_project,
+        settings.google_cloud_location,
+        settings.google_genai_use_vertexai,
+    )
     # No database connection is opened here on purpose: /health must answer
     # even when PostgreSQL is down. Use /readyz to check the database.
     yield

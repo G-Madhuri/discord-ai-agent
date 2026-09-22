@@ -82,14 +82,14 @@ class Settings(BaseSettings):
     backend_base_url: str = "http://localhost:8000"
     internal_api_token: SecretStr | None = None
 
-    # --- Pinecone + Hybrid RAG (Phase 6) ---
-    pinecone_api_key: SecretStr | None = None
-    pinecone_index_name: str | None = None
-    pinecone_environment: str | None = None
-    pinecone_namespace_prefix: str | None = None
-
-    rag_vector_store: VectorStoreName = "pinecone"
+    # --- pgvector + Hybrid RAG (Phase 6) ---
+    rag_vector_store: VectorStoreName = "postgres"
     rag_retrieval_mode: str = "hybrid"
+    rag_chunk_method: str = "semantic"
+    rag_chunk_min_tokens: int = 100
+    rag_chunk_max_tokens: int = 800
+    rag_semantic_chunk_threshold: float | None = None
+    rag_chunk_overlap_sentences: int = 1
     rag_semantic_top_k: int = 20
     rag_keyword_top_k: int = 20
     rag_final_top_k: int = 5

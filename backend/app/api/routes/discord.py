@@ -35,6 +35,7 @@ router = APIRouter(prefix="/discord", tags=["discord"])
 # Temporary in-memory pending modal session store
 _PENDING_MODAL_SESSIONS: dict[str, dict[str, Any]] = {}
 _PENDING_MEMBER_SELECTIONS: dict[str, list[str]] = {}
+_PENDING_MEMBER_DETAILS: dict[str, dict[str, dict[str, str]]] = {}
 
 
 def verify_signature(raw_body: bytes, signature: str | None, timestamp: str | None) -> None:
@@ -128,6 +129,7 @@ async def _execute_and_patch_project_plan(
     constraints: str | None = None,
     file_bytes: bytes | None = None,
     filename: str | None = None,
+    member_details: dict[str, dict[str, str]] | None = None,
 ) -> None:
     """Execute LLM agentic project planning pipeline in background and PATCH Discord with summary + buttons."""
     webhook_url = f"https://discord.com/api/v10/webhooks/{application_id}/{token}/messages/@original"
@@ -141,6 +143,7 @@ async def _execute_and_patch_project_plan(
             constraints=constraints,
             file_bytes=file_bytes,
             filename=filename,
+            member_details=member_details,
         )
 
         project_key = res["project_key"]
@@ -216,6 +219,140 @@ async def _execute_and_patch_project_plan(
         logger.error("Failed to send plan summary PATCH for %s: %s", name, exc)
 
 
+async def _execute_and_patch_approve_project(
+    application_id: str,
+    token: str,
+    guild_id: str,
+    user_id: str,
+    project_key: str,
+) -> None:
+    """Commit project plan assignments in background with bulk operations and PATCH Discord."""
+    webhook_url = f"https://discord.com/api/v10/webhooks/{application_id}/{token}/messages/@original"
+
+    try:
+        async with asyncio.timeout(10.0):
+            async with session_scope() as session:
+                server = await member_service.resolve_server(
+                    session, ServerContext(discord_guild_id=guild_id)
+                )
+
+                project = await project_service.get_project_by_key(session, server.id, project_key)
+                if not project or str(project.server_id) != str(server.id):
+                    patch_body = {"content": "⚠️ Permission denied: Project not found on this server.", "components": []}
+                else:
+                    creator_id = project.created_by_user_id
+                    if creator_id and creator_id != "<legacy>" and creator_id != user_id:
+                        patch_body = {
+                            "content": f"⚠️ Only the project creator (<@{creator_id}>) can do this.",
+                            "components": [],
+                        }
+                    else:
+                        draft_map = project.draft_assignments or {}
+                        committed_count = 0
+                        for t_key, draft_item in draft_map.items():
+                            m_id_str = draft_item.get("assigned_member_id")
+                            if m_id_str:
+                                try:
+                                    task = await task_service.get_task_by_key(session, server.id, t_key)
+                                    member = await member_service.get_member_by_id(
+                                        session, server.id, UUID(m_id_str)
+                                    )
+                                    if task and member:
+                                        await assignment_service.create_assignment(
+                                            session,
+                                            server.id,
+                                            task,
+                                            member,
+                                            decision_mode=DecisionMode.DETERMINISTIC,
+                                            auto_commit=False,
+                                        )
+                                        committed_count += 1
+                                except Exception as exc:
+                                    logger.warning("Failed committing draft assignment for %s: %s", t_key, exc)
+
+                        project.status = ProjectStatus.ACTIVE
+                        project.plan_status = PlanStatus.ACTIVE
+
+                        approval = ProjectPlanApproval(
+                            project_id=project.id,
+                            approved_by_user_id=user_id,
+                            approved_at=datetime.now(timezone.utc),
+                            action="approved",
+                        )
+                        session.add(approval)
+                        await session.commit()
+
+                        patch_body = {
+                            "content": f"✅ Project **{project.name}** (`{project_key}`) is now active! {committed_count} assignments committed.",
+                            "components": [],
+                        }
+
+    except Exception as exc:
+        logger.exception("Failed approving project %s", project_key)
+        patch_body = {"content": f"⚠️ Approval failed: {exc}", "components": []}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.patch(webhook_url, json=patch_body)
+            logger.info("Outbound approval PATCH for %s -> HTTP success", project_key)
+    except Exception as exc:
+        logger.error("Failed to send approval PATCH for %s: %s", project_key, exc)
+
+
+async def _execute_and_patch_reject_project(
+    application_id: str,
+    token: str,
+    guild_id: str,
+    user_id: str,
+    project_key: str,
+) -> None:
+    """Reject project plan in background and PATCH Discord."""
+    webhook_url = f"https://discord.com/api/v10/webhooks/{application_id}/{token}/messages/@original"
+
+    try:
+        async with asyncio.timeout(10.0):
+            async with session_scope() as session:
+                server = await member_service.resolve_server(
+                    session, ServerContext(discord_guild_id=guild_id)
+                )
+
+                project = await project_service.get_project_by_key(session, server.id, project_key)
+                if not project or str(project.server_id) != str(server.id):
+                    patch_body = {"content": "⚠️ Permission denied: Project not found on this server.", "components": []}
+                else:
+                    creator_id = project.created_by_user_id
+                    if creator_id and creator_id != "<legacy>" and creator_id != user_id:
+                        patch_body = {
+                            "content": f"⚠️ Only the project creator (<@{creator_id}>) can do this.",
+                            "components": [],
+                        }
+                    else:
+                        project.status = ProjectStatus.ARCHIVED
+                        approval = ProjectPlanApproval(
+                            project_id=project.id,
+                            approved_by_user_id=user_id,
+                            approved_at=datetime.now(timezone.utc),
+                            action="rejected",
+                        )
+                        session.add(approval)
+                        await session.commit()
+
+                        patch_body = {
+                            "content": f"❌ Plan rejected for project **{project.name}** (`{project_key}`). Run `/project create` again to start over.",
+                            "components": [],
+                        }
+
+    except Exception as exc:
+        logger.exception("Failed rejecting project %s", project_key)
+        patch_body = {"content": f"⚠️ Rejection failed: {exc}", "components": []}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.patch(webhook_url, json=patch_body)
+    except Exception as exc:
+        logger.error("Failed to send rejection PATCH for %s: %s", project_key, exc)
+
+
 @router.post("/interactions")
 async def discord_interactions(
     request: Request, background_tasks: BackgroundTasks
@@ -257,6 +394,7 @@ async def discord_interactions(
             proj_name = args.get("name") or args.get("project_name") or "New Project"
             session_key = f"{channel_id}:{user_id}"
             _PENDING_MEMBER_SELECTIONS[session_key] = []
+            _PENDING_MEMBER_DETAILS[session_key] = {}
             return {
                 "type": 4,
                 "data": {
@@ -376,8 +514,11 @@ async def discord_interactions(
                     elif c_id == "constraints":
                         constraints = comp.get("value", "").strip() or None
 
-            # Retrieve member_discord_ids from prior UserSelect step
+            logger.info("modal submit: name=%r desc_len=%d constraints=%r", name, len(description), constraints)
+
+            # Retrieve member_discord_ids & member_details from prior UserSelect step
             member_discord_ids = _PENDING_MEMBER_SELECTIONS.get(session_key, [])
+            member_details = _PENDING_MEMBER_DETAILS.get(session_key, {})
             if not member_discord_ids:
                 member_discord_ids = [user_id]
 
@@ -390,6 +531,7 @@ async def discord_interactions(
                 "description": description,
                 "member_discord_ids": member_discord_ids,
                 "constraints": constraints,
+                "member_details": member_details,
             }
 
             # Return type 4 with Skip File Upload button
@@ -437,6 +579,8 @@ async def discord_interactions(
 
     # Type 3: MESSAGE_COMPONENT (Button Clicks & Select Menus)
     if interaction_type == 3:
+        application_id = str(body.get("application_id") or settings.discord_application_id or "")
+        token = str(body.get("token") or "")
         data = body.get("data", {})
         custom_id = data.get("custom_id", "")
         guild_id = str(body.get("guild_id") or "unknown-guild")
@@ -444,13 +588,26 @@ async def discord_interactions(
         user = body.get("member", {}).get("user", {}) or body.get("user", {})
         user_id = str(user.get("id") or "unknown-user")
 
-        # UserSelect Selection Event: Save selected user IDs to pending cache (Item 1)
+        # UserSelect Selection Event: Save selected user IDs and resolved details to pending cache
         if custom_id.startswith("proj_user_select:"):
             parts = custom_id.split(":", 2)
             session_key = parts[1] if len(parts) > 1 else f"{channel_id}:{user_id}"
             selected_uids = data.get("values", [])
+            resolved = data.get("resolved", {})
+            resolved_users = resolved.get("users", {})
+            resolved_members = resolved.get("members", {})
+
+            details = {}
+            for uid in selected_uids:
+                u_info = resolved_users.get(uid, {})
+                m_info = resolved_members.get(uid, {})
+                username = u_info.get("username") or f"user_{uid}"
+                disp_name = m_info.get("nick") or u_info.get("global_name") or username
+                details[uid] = {"username": username, "display_name": disp_name}
+
             _PENDING_MEMBER_SELECTIONS[session_key] = selected_uids
-            logger.info("Saved user selection for %s: %s", session_key, selected_uids)
+            _PENDING_MEMBER_DETAILS[session_key] = details
+            logger.info("Saved user selection for %s: %s (%s)", session_key, selected_uids, details)
             return {"type": 6}  # DEFERRED_UPDATE_MESSAGE
 
         # Continue Button Click: Open 3-Field Modal (Item 1)
@@ -528,6 +685,7 @@ async def discord_interactions(
                     sess_data["constraints"],
                     None,
                     None,
+                    sess_data.get("member_details"),
                 )
                 return {
                     "type": 7,
@@ -538,104 +696,31 @@ async def discord_interactions(
                 }
             return {"type": 7, "data": {"content": "⏳ Planning project...", "components": []}}
 
-        # Button: Approve Project (Amendment 4 & Amendment 5)
+        # Button: Approve Project (Background defer pattern to prevent Discord 3s timeout)
         if custom_id.startswith("approve_project:"):
             project_key = custom_id.split(":", 1)[1]
-            async with session_scope() as session:
-                server = await member_service.resolve_server(
-                    session, ServerContext(discord_guild_id=guild_id)
-                )
+            background_tasks.add_task(
+                _execute_and_patch_approve_project,
+                application_id,
+                token,
+                guild_id,
+                user_id,
+                project_key,
+            )
+            return {"type": 6}  # DEFERRED_UPDATE_MESSAGE
 
-                # Fetch project & check cross-server isolation (Amendment 5)
-                project = await project_service.get_project_by_key(session, server.id, project_key)
-                if not project or str(project.server_id) != str(server.id):
-                    return {
-                        "type": 4,
-                        "data": {
-                            "content": "⚠️ Permission denied: You cannot approve a project from a different Discord server.",
-                            "flags": 64,
-                        },
-                    }
-
-                # Commit assignments from project.draft_assignments (Amendment 4)
-                draft_map = project.draft_assignments or {}
-                committed_count = 0
-                for t_key, draft_item in draft_map.items():
-                    m_id_str = draft_item.get("assigned_member_id")
-                    if m_id_str:
-                        try:
-                            task = await task_service.get_task_by_key(session, server.id, t_key)
-                            member = await member_service.get_member_by_id(session, UUID(m_id_str))
-                            if task and member:
-                                await assignment_service.create_assignment(
-                                    session,
-                                    server.id,
-                                    task,
-                                    member,
-                                    decision_mode=DecisionMode.DETERMINISTIC,
-                                    auto_commit=False,
-                                )
-                                committed_count += 1
-                        except Exception as exc:
-                            logger.warning("Failed committing draft assignment for %s: %s", t_key, exc)
-
-                # Set project active
-                project.status = ProjectStatus.ACTIVE
-                project.plan_status = PlanStatus.ACTIVE
-
-                # Insert project_plan_approval row
-                approval = ProjectPlanApproval(
-                    project_id=project.id,
-                    approved_by_user_id=user_id,
-                    approved_at=datetime.now(timezone.utc),
-                    action="approved",
-                )
-                session.add(approval)
-                await session.commit()
-
-                return {
-                    "type": 7,
-                    "data": {
-                        "content": f"✅ Project **{project.name}** (`{project_key}`) is now active! {committed_count} assignments committed.",
-                        "components": [],
-                    },
-                }
-
-        # Button: Reject Project
+        # Button: Reject Project (Background defer pattern)
         if custom_id.startswith("reject_project:"):
             project_key = custom_id.split(":", 1)[1]
-            async with session_scope() as session:
-                server = await member_service.resolve_server(
-                    session, ServerContext(discord_guild_id=guild_id)
-                )
-
-                project = await project_service.get_project_by_key(session, server.id, project_key)
-                if not project or str(project.server_id) != str(server.id):
-                    return {
-                        "type": 4,
-                        "data": {
-                            "content": "⚠️ Permission denied: You cannot reject a project from a different Discord server.",
-                            "flags": 64,
-                        },
-                    }
-
-                project.status = ProjectStatus.ARCHIVED
-                approval = ProjectPlanApproval(
-                    project_id=project.id,
-                    approved_by_user_id=user_id,
-                    approved_at=datetime.now(timezone.utc),
-                    action="rejected",
-                )
-                session.add(approval)
-                await session.commit()
-
-                return {
-                    "type": 7,
-                    "data": {
-                        "content": f"❌ Plan rejected for project **{project.name}** (`{project_key}`). Run `/project create` again to start over.",
-                        "components": [],
-                    },
-                }
+            background_tasks.add_task(
+                _execute_and_patch_reject_project,
+                application_id,
+                token,
+                guild_id,
+                user_id,
+                project_key,
+            )
+            return {"type": 6}  # DEFERRED_UPDATE_MESSAGE
 
         # Button: Edit Project
         if custom_id.startswith("edit_project:"):

@@ -101,7 +101,7 @@ flow can be exercised without Discord.
 pytest
 ```
 
-Runs the complete test suite (37+ baseline unit/integration tests and PostgreSQL schema constraint regression tests).
+Runs the complete test suite (63 passing unit, integration, and performance tests).
 
 ### Run the Discord bot locally
 
@@ -153,14 +153,14 @@ hardcoded and `.env` is git-ignored.
 scoring engine decides and the service persists. `llm` puts Gemini in front of
 the same tools and the same persistence path.
 
-## Deploy to Cloud Run
+## Deploy on Railway
 
-The application is deployed to Google Cloud Run with secret resolution via Secret Manager:
+The application is deployed on [Railway](https://railway.app/) using containerized runtime deployment:
 
-- **Production Health URL**: `https://discord-agent-499979613721.us-central1.run.app/health`
-- **Discord Interactions URL**: `https://discord-agent-499979613721.us-central1.run.app/discord/interactions`
+- **Deployment Configuration**: Set up via `railway.json` at repo root.
+- **Discord Interaction Webhook Endpoint**: `https://<YOUR_RAILWAY_URL>/discord/interactions`
 
-For step-by-step instructions, container specs, IAM roles, and secret mappings, see [`docs/deploy.md`](docs/deploy.md).
+For step-by-step Railway deployment setup, environment variable configuration, hard budget limits, and Discord Developer Portal integration, see [`docs/railway-deploy.md`](docs/railway-deploy.md).
 
 ## Layout
 
@@ -183,13 +183,12 @@ scripts/
 
 ## Status
 
-**Implemented:** data model, assignment engine and workflow, agent tool surface, knowledge/RAG pipeline, REST API, Discord command surface (Gateway + HTTP Interactions), plan guard, server isolation, audit trail, Google Cloud Run deployment, Secret Manager integration, tests.
-
-**Not implemented yet:** project planning (guard only — deliberately), Pinecone vector search, hybrid RAG tuning.
+**Implemented:** data model, assignment engine and workflow, agent tool surface, knowledge/RAG pipeline (pgvector + semantic chunking + hybrid search), REST API, Discord command surface (Gateway + HTTP Interactions), plan guard, server isolation, audit trail, Railway container deployment, unit & integration tests.
 
 ## Documentation
 
 * [Architecture](docs/architecture.md) — layers, isolation, why the LLM cannot write to the database
 * [Assignment engine](docs/assignment.md) — the workflow, the scoring, what gets stored for audit
 * [Discord Wiring](docs/discord.md) — slash commands, Gateway vs. HTTP Interactions, Ed25519 signature verification
-* [Cloud Run Deployment](docs/deploy.md) — GCP setup, Artifact Registry, Secret Manager mapping, container specs
+* [Railway Deployment](docs/railway-deploy.md) — Railway configuration, secret setup, budget limits, Discord endpoint registration
+* [Deployment Overview](docs/deployment.md) — active Railway target and historical Cloud Run deployment reference
