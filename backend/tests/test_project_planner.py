@@ -676,6 +676,68 @@ async def test_search_knowledge_skips_when_no_docs(session):
     assert hits == []
 
 
+@pytest.mark.asyncio
+async def test_batch_assignment_workload_fallback_balanced(session):
+    """Assert batch assignments distribute evenly across members when no skills match."""
+    guild_id = f"guild_balanced_{uuid4().hex[:6]}"
+    s_ctx = ServerContext(discord_guild_id=guild_id)
+    server = await server_service.resolve_server(session, s_ctx, create=True)
+
+    # 2 members, NO skills
+    await member_service.create_or_update_member(
+        session,
+        server.id,
+        MemberCreate(
+            context=s_ctx,
+            discord_user_id="user_alpha",
+            username="user_alpha",
+            display_name="User Alpha",
+            skills=[],
+        ),
+    )
+    await member_service.create_or_update_member(
+        session,
+        server.id,
+        MemberCreate(
+            context=s_ctx,
+            discord_user_id="user_beta",
+            username="user_beta",
+            display_name="User Beta",
+            skills=[],
+        ),
+    )
+
+    desc = """Tasks:
+- Task 1
+- Task 2
+- Task 3
+- Task 4
+- Task 5
+- Task 6"""
+
+    res = await plan_project(
+        server_ctx=s_ctx,
+        name="Balanced Distribution Test",
+        description=desc,
+        member_discord_ids=["user_alpha", "user_beta"],
+    )
+
+    draft_map = res["draft_assignments"]
+    assert len(draft_map) == 6
+
+    counts = {}
+    for item in draft_map.values():
+        name = item["assigned_display_name"]
+        counts[name] = counts.get(name, 0) + 1
+
+    assert "User Alpha" in counts
+    assert "User Beta" in counts
+    assert counts["User Alpha"] == 3
+    assert counts["User Beta"] == 3
+    assert counts["User Alpha"] + counts["User Beta"] == 6
+
+
+
 
 
 

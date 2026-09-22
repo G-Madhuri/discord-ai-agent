@@ -297,7 +297,7 @@ def _build_reasons(
     reasons: list[str] = []
 
     if task.requirements and not matched:
-        reasons.append("⚠️ Assigned via workload fallback (no skill match)")
+        reasons.append("⚠️ Assigned via workload fallback (no skill match; balanced load)")
 
     if matched:
         names = ", ".join(m.name for m in matched[:4])

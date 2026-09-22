@@ -612,6 +612,11 @@ async def plan_project(
 
         # STEP 5: Run Deterministic Assignment Engine for evidence calculation (Amendment 4)
         # Store in project.draft_assignments JSONB (DO NOT write to assignments/assignment_history)
+        working_workload: dict[uuid.UUID, int] = {}
+        for mem in member_profiles:
+            active_count = await task_service.count_active_member_tasks(session, server_id, mem.id)
+            working_workload[mem.id] = active_count
+
         draft_assignments_map = {}
         for t_row in created_tasks:
             t_loaded_res = await session.execute(
@@ -620,7 +625,9 @@ async def plan_project(
                 .where(Task.id == t_row.id)
             )
             t_loaded = t_loaded_res.scalar_one()
-            eval_res = await assignment_service.build_evaluation(session, server_id, t_loaded, project)
+            eval_res = await assignment_service.build_evaluation(
+                session, server_id, t_loaded, project, working_workload=working_workload
+            )
             # Filter ranked candidates by member_exclusions using member_id BEFORE scoring (Item 5)
             filtered_ranked = []
             if eval_res and eval_res.ranked:
@@ -641,6 +648,7 @@ async def plan_project(
             best_cand = filtered_ranked[0] if filtered_ranked else None
 
             if best_cand:
+                working_workload[best_cand.member_id] = working_workload.get(best_cand.member_id, 0) + 1
                 draft_assignments_map[t_row.key] = {
                     "task_id": str(t_row.id),
                     "task_key": t_row.key,
@@ -662,6 +670,17 @@ async def plan_project(
                     "score": 0.0,
                     "evidence_bullets": ["Excluded by user constraint" if eval_res and eval_res.ranked else "No suitable candidate found"],
                 }
+
+        counts_by_display_name: dict[str, int] = {}
+        for item in draft_assignments_map.values():
+            d_name = item.get("assigned_display_name") or "unassigned"
+            counts_by_display_name[d_name] = counts_by_display_name.get(d_name, 0) + 1
+
+        logger.info(
+            "Batch assignment: %d tasks distributed as %s",
+            len(created_tasks),
+            counts_by_display_name,
+        )
 
         project.draft_assignments = draft_assignments_map
         await session.commit()

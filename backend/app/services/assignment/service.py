@@ -124,6 +124,8 @@ async def build_evaluation(
     server_id: uuid.UUID,
     task: Task,
     project: Project,
+    *,
+    working_workload: dict[uuid.UUID, int] | None = None,
 ) -> AssignmentEvaluation:
     """Steps 4–10: gather evidence and rank candidates. Read-only."""
     requirements = tuple(
@@ -160,32 +162,45 @@ async def build_evaluation(
         session, server_id, project.id, member_ids, required_slugs
     )
 
-    candidates = tuple(
-        CandidateInput(
-            member_id=member.id,
-            discord_user_id=member.user.discord_user_id if member.user else "",
-            display_name=member.display_name,
-            availability=member.availability,
-            role=member.role,
-            project_role=link.project_role,
-            seniority=member.seniority,
-            years_experience=member.years_experience,
-            skills=tuple(
-                CandidateSkill(
-                    slug=ms.skill.slug,
-                    name=ms.skill.name,
-                    proficiency=ms.proficiency,
-                    years_experience=ms.years_experience,
-                )
-                for ms in member.skills
-                if ms.skill is not None
-            ),
-            active_task_keys=tuple(workload.get(member.id, [])),
-            capacity=member.max_concurrent_tasks or settings.default_member_capacity,
-            completed_related_task_keys=tuple(prior.get(member.id, [])),
+    candidates_list = []
+    for link, member in member_rows:
+        db_keys = list(workload.get(member.id, []))
+        if working_workload is not None and member.id in working_workload:
+            target_count = working_workload[member.id]
+            if target_count > len(db_keys):
+                extra = target_count - len(db_keys)
+                active_keys = tuple(db_keys + [f"working_task_{i}" for i in range(extra)])
+            else:
+                active_keys = tuple(db_keys[:target_count])
+        else:
+            active_keys = tuple(db_keys)
+
+        candidates_list.append(
+            CandidateInput(
+                member_id=member.id,
+                discord_user_id=member.user.discord_user_id if member.user else "",
+                display_name=member.display_name,
+                availability=member.availability,
+                role=member.role,
+                project_role=link.project_role,
+                seniority=member.seniority,
+                years_experience=member.years_experience,
+                skills=tuple(
+                    CandidateSkill(
+                        slug=ms.skill.slug,
+                        name=ms.skill.name,
+                        proficiency=ms.proficiency,
+                        years_experience=ms.years_experience,
+                    )
+                    for ms in member.skills
+                    if ms.skill is not None
+                ),
+                active_task_keys=active_keys,
+                capacity=member.max_concurrent_tasks or settings.default_member_capacity,
+                completed_related_task_keys=tuple(prior.get(member.id, [])),
+            )
         )
-        for link, member in member_rows
-    )
+    candidates = tuple(candidates_list)
 
     # 9. dependencies
     dependency_check = await task_service.check_dependencies(session, task)

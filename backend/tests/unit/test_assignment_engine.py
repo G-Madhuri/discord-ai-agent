@@ -104,7 +104,7 @@ def test_workload_fallback_when_no_skill_matches():
     assert result.best is not None
     # Bob has lower active task count (0 vs 1), so Bob wins tiebreaker
     assert result.best.display_name == "Bob"
-    assert "⚠️ Assigned via workload fallback (no skill match)" in result.best.reasons
+    assert "⚠️ Assigned via workload fallback (no skill match; balanced load)" in result.best.reasons
 
 
 def test_every_candidate_is_scored_and_explained():
