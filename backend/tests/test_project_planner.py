@@ -466,4 +466,37 @@ async def test_customer_portal_plan_quality():
     assert len(plan.constraints_parsed.member_exclusions) == 0
 
 
+@pytest.mark.asyncio
+async def test_approval_failure_patches_error_and_logs_error(caplog):
+    """Bug 2: Assert that DB write failure in approval background handler sends an error PATCH (not success) and logs ERROR."""
+    import logging
+    from unittest.mock import AsyncMock, patch
+    from app.api.routes.discord import _execute_and_patch_approve_project
+
+    mock_patch = AsyncMock()
+
+    with patch("app.api.routes.discord.session_scope", side_effect=RuntimeError("Database connection lost")), \
+         patch("httpx.AsyncClient.patch", new=mock_patch):
+        with caplog.at_level(logging.ERROR):
+            await _execute_and_patch_approve_project(
+                application_id="12345",
+                token="dummy_token",
+                guild_id="guild_101",
+                user_id="user_101",
+                project_key="TEST-PROJ",
+            )
+
+    mock_patch.assert_called_once()
+    _, kwargs = mock_patch.call_args
+    patch_content = kwargs.get("json", {}).get("content", "")
+
+    assert "Failed" in patch_content
+    assert "is now active" not in patch_content
+
+    error_logs = [rec for rec in caplog.records if rec.levelno >= logging.ERROR]
+    assert len(error_logs) > 0
+    assert any("Failed approving project TEST-PROJ" in rec.message for rec in error_logs)
+
+
+
 

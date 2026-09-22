@@ -6,6 +6,7 @@ Shared between Gateway slash commands (bot.py) and HTTP Interaction endpoint
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 

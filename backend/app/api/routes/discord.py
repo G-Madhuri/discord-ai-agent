@@ -6,6 +6,7 @@ and Button Component Interactions (type 3).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -229,6 +230,9 @@ async def _execute_and_patch_approve_project(
     """Commit project plan assignments in background with bulk operations and PATCH Discord."""
     webhook_url = f"https://discord.com/api/v10/webhooks/{application_id}/{token}/messages/@original"
 
+    patch_body: dict[str, Any] = {}
+    is_error = False
+
     try:
         async with asyncio.timeout(10.0):
             async with session_scope() as session:
@@ -238,10 +242,12 @@ async def _execute_and_patch_approve_project(
 
                 project = await project_service.get_project_by_key(session, server.id, project_key)
                 if not project or str(project.server_id) != str(server.id):
+                    is_error = True
                     patch_body = {"content": "⚠️ Permission denied: Project not found on this server.", "components": []}
                 else:
                     creator_id = project.created_by_user_id
                     if creator_id and creator_id != "<legacy>" and creator_id != user_id:
+                        is_error = True
                         patch_body = {
                             "content": f"⚠️ Only the project creator (<@{creator_id}>) can do this.",
                             "components": [],
@@ -288,13 +294,17 @@ async def _execute_and_patch_approve_project(
                         }
 
     except Exception as exc:
-        logger.exception("Failed approving project %s", project_key)
-        patch_body = {"content": f"⚠️ Approval failed: {exc}", "components": []}
+        is_error = True
+        logger.exception("Failed approving project %s: %s", project_key, exc)
+        patch_body = {"content": f"⚠️ Failed to approve project. Error: {exc}", "components": []}
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             await client.patch(webhook_url, json=patch_body)
-            logger.info("Outbound approval PATCH for %s -> HTTP success", project_key)
+            if is_error:
+                logger.error("Outbound approval error PATCH sent for %s", project_key)
+            else:
+                logger.info("Outbound approval PATCH for %s -> HTTP success", project_key)
     except Exception as exc:
         logger.error("Failed to send approval PATCH for %s: %s", project_key, exc)
 
@@ -309,6 +319,9 @@ async def _execute_and_patch_reject_project(
     """Reject project plan in background and PATCH Discord."""
     webhook_url = f"https://discord.com/api/v10/webhooks/{application_id}/{token}/messages/@original"
 
+    patch_body: dict[str, Any] = {}
+    is_error = False
+
     try:
         async with asyncio.timeout(10.0):
             async with session_scope() as session:
@@ -318,10 +331,12 @@ async def _execute_and_patch_reject_project(
 
                 project = await project_service.get_project_by_key(session, server.id, project_key)
                 if not project or str(project.server_id) != str(server.id):
+                    is_error = True
                     patch_body = {"content": "⚠️ Permission denied: Project not found on this server.", "components": []}
                 else:
                     creator_id = project.created_by_user_id
                     if creator_id and creator_id != "<legacy>" and creator_id != user_id:
+                        is_error = True
                         patch_body = {
                             "content": f"⚠️ Only the project creator (<@{creator_id}>) can do this.",
                             "components": [],
@@ -343,12 +358,17 @@ async def _execute_and_patch_reject_project(
                         }
 
     except Exception as exc:
-        logger.exception("Failed rejecting project %s", project_key)
-        patch_body = {"content": f"⚠️ Rejection failed: {exc}", "components": []}
+        is_error = True
+        logger.exception("Failed rejecting project %s: %s", project_key, exc)
+        patch_body = {"content": f"⚠️ Failed to reject project. Error: {exc}", "components": []}
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             await client.patch(webhook_url, json=patch_body)
+            if is_error:
+                logger.error("Outbound rejection error PATCH sent for %s", project_key)
+            else:
+                logger.info("Outbound rejection PATCH for %s -> HTTP success", project_key)
     except Exception as exc:
         logger.error("Failed to send rejection PATCH for %s: %s", project_key, exc)
 
