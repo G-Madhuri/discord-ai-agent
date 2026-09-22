@@ -17,12 +17,16 @@ def materialize_google_credentials() -> None:
     """
     b64 = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
     if not b64:
-        logger.info("GOOGLE_APPLICATION_CREDENTIALS_JSON not set; relying on ADC")
+        msg = "GOOGLE_APPLICATION_CREDENTIALS_JSON not set; relying on ADC"
+        print(f"[BOOT] {msg}", flush=True)
+        logger.info(msg)
         return
     try:
         raw = base64.b64decode(b64)
     except Exception as exc:
-        logger.error("failed to base64-decode credentials: %s", exc)
+        msg = f"failed to base64-decode credentials: {exc}"
+        print(f"[BOOT] {msg}", flush=True)
+        logger.error(msg)
         raise
 
     os.makedirs(os.path.dirname(CREDENTIALS_PATH), exist_ok=True)
@@ -33,8 +37,9 @@ def materialize_google_credentials() -> None:
     except Exception:
         pass
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
-    logger.info("materialized Google credentials at %s", CREDENTIALS_PATH)
-    logger.info(
-        "GOOGLE_APPLICATION_CREDENTIALS is now %s",
-        os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"),
-    )
+    msg_mat = f"materialized Google credentials at {CREDENTIALS_PATH}"
+    msg_env = f"GOOGLE_APPLICATION_CREDENTIALS is now {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}"
+    print(f"[BOOT] {msg_mat}", flush=True)
+    print(f"[BOOT] {msg_env}", flush=True)
+    logger.info(msg_mat)
+    logger.info(msg_env)
