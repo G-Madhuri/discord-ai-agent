@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     google_cloud_location: str = "us-central1"
     google_genai_use_vertexai: bool = True
     gemini_model: str = "gemini-2.5-flash"
+    google_application_credentials_json: str | None = Field(
+        default=None, validation_alias="GOOGLE_APPLICATION_CREDENTIALS_JSON"
+    )
 
     # --- Agent Mode ---
     agent_mode: AgentMode = "deterministic"
