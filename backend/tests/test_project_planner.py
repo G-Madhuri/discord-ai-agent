@@ -532,7 +532,7 @@ async def test_count_active_member_tasks(session):
         ),
     )
 
-    cnt0 = await task_service.count_active_member_tasks(session, mem.id)
+    cnt0 = await task_service.count_active_member_tasks(session, server.id, mem.id)
     assert cnt0 == 0
 
     for i in range(3):
@@ -561,7 +561,7 @@ async def test_count_active_member_tasks(session):
         )
         await session.commit()
 
-    cnt3 = await task_service.count_active_member_tasks(session, mem.id)
+    cnt3 = await task_service.count_active_member_tasks(session, server.id, mem.id)
     assert cnt3 == 3
 
 

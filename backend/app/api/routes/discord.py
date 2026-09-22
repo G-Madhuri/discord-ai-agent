@@ -26,7 +26,7 @@ from app.discord.command_handler import handle_command
 from app.models.enums import DecisionMode, PlanStatus, ProjectStatus
 from app.models.project import ProjectPlanApproval
 from app.schemas.common import ServerContext
-from app.services import member_service, project_service, task_service
+from app.services import member_service, project_service, server_service, task_service
 from app.services.assignment import service as assignment_service
 
 logger = get_logger(__name__)
@@ -288,7 +288,7 @@ async def _execute_and_patch_approve_project(
     try:
         async with asyncio.timeout(10.0):
             async with session_scope() as session:
-                server = await member_service.resolve_server(
+                server = await server_service.resolve_server(
                     session, ServerContext(discord_guild_id=guild_id)
                 )
 
@@ -377,7 +377,7 @@ async def _execute_and_patch_reject_project(
     try:
         async with asyncio.timeout(10.0):
             async with session_scope() as session:
-                server = await member_service.resolve_server(
+                server = await server_service.resolve_server(
                     session, ServerContext(discord_guild_id=guild_id)
                 )
 

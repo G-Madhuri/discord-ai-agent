@@ -243,13 +243,15 @@ async def to_task_read(session: AsyncSession, task: Task, project_key: str) -> T
 
 async def count_active_member_tasks(
     session: AsyncSession,
+    server_id: uuid.UUID,
     member_profile_id: uuid.UUID,
 ) -> int:
-    """Count active task assignments for a given member profile."""
+    """Count active task assignments for a given member profile on a server."""
     stmt = (
         sa.select(sa.func.count())
         .select_from(Assignment)
         .where(
+            Assignment.server_id == server_id,
             Assignment.member_profile_id == member_profile_id,
             Assignment.status.in_([AssignmentStatus.PROPOSED, AssignmentStatus.ACTIVE]),
         )
