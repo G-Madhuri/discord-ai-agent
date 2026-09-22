@@ -505,7 +505,7 @@ async def plan_project(
                 members_info.append(
                     {
                         "member_id": str(mem.id),
-                        "discord_user_id": mem.discord_user_id,
+                        "discord_user_id": mem.discord_user_id or d_id,
                         "display_name": mem.display_name,
                         "role": mem.role,
                         "skills": skills_list,

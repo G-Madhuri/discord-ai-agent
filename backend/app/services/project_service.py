@@ -31,6 +31,10 @@ async def get_project(
     return result.scalar_one_or_none()
 
 
+# Alias for backward compatibility across route handlers
+get_project_by_key = get_project
+
+
 async def require_project(session: AsyncSession, server_id: uuid.UUID, project_key: str) -> Project:
     project = await get_project(session, server_id, project_key)
     if project is None:

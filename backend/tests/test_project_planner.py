@@ -587,8 +587,94 @@ def test_split_text_into_chunks_with_30_tasks():
     assert len(content) > 2000
     chunks = split_text_into_chunks(content, max_chars=1900)
     assert len(chunks) >= 2
+    assert len(content) > 2000
+    chunks = split_text_into_chunks(content, max_chars=1900)
+    assert len(chunks) >= 2
     for chunk in chunks:
         assert len(chunk) <= 2000
+
+
+@pytest.mark.asyncio
+async def test_member_profile_properties(session):
+    """Bug 1 fix test: Assert discord_user_id and username properties on MemberProfile work."""
+    from app.schemas.common import ServerContext
+    from app.schemas.member import MemberCreate
+    from app.services import member_service, server_service
+
+    s_ctx = ServerContext(discord_guild_id="guild_prop_test")
+    server = await server_service.resolve_server(session, s_ctx, create=True)
+    mem = await member_service.create_or_update_member(
+        session,
+        server.id,
+        MemberCreate(
+            context=s_ctx,
+            discord_user_id="1234567890",
+            username="prop_user",
+            display_name="Property User",
+        ),
+    )
+    assert mem.discord_user_id == "1234567890"
+    assert mem.username == "prop_user"
+
+
+@pytest.mark.asyncio
+async def test_reject_project_handler(session, monkeypatch):
+    """Bug 2 fix test: Assert _execute_and_patch_reject_project works without AttributeError."""
+    from app.api.routes.discord import _execute_and_patch_reject_project
+    from app.schemas.common import ServerContext
+    from app.schemas.project import ProjectCreate
+    from app.services import project_service, server_service
+    import httpx
+
+    # Mock outbound httpx patch
+    async def mock_patch(*args, **kwargs):
+        class MockResponse:
+            status_code = 200
+        return MockResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "patch", mock_patch)
+
+    s_ctx = ServerContext(discord_guild_id="guild_reject_test", requested_by_discord_id="user_reject_creator")
+    server = await server_service.resolve_server(session, s_ctx, create=True)
+    project = await project_service.create_project(
+        session, server.id, ProjectCreate(context=s_ctx, key="REJECT1", name="Reject Test")
+    )
+    await session.commit()
+
+    await _execute_and_patch_reject_project(
+        application_id="123",
+        token="abc",
+        guild_id="guild_reject_test",
+        user_id="user_reject_creator",
+        project_key="REJECT1",
+    )
+
+    res = await session.execute(
+        sa.select(Project)
+        .where(Project.server_id == server.id, Project.key == "REJECT1")
+        .execution_options(populate_existing=True)
+    )
+    updated_proj = res.scalar_one_or_none()
+    assert updated_proj is not None
+    assert updated_proj.status == ProjectStatus.ARCHIVED
+
+
+@pytest.mark.asyncio
+async def test_search_knowledge_skips_when_no_docs(session):
+    """Bug 3 fix test: Assert search_knowledge returns [] immediately when project has 0 docs."""
+    from app.schemas.common import ServerContext
+    from app.schemas.project import ProjectCreate
+    from app.services import knowledge_service, project_service, server_service
+
+    s_ctx = ServerContext(discord_guild_id="guild_rag_skip")
+    server = await server_service.resolve_server(session, s_ctx, create=True)
+    project = await project_service.create_project(
+        session, server.id, ProjectCreate(context=s_ctx, key="NODOCS", name="No Docs Project")
+    )
+
+    hits = await knowledge_service.search_knowledge(session, project, "database schema query")
+    assert hits == []
+
 
 
 

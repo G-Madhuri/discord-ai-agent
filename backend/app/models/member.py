@@ -57,5 +57,13 @@ class MemberProfile(Base, TimestampMixin):
     )
     assignments: Mapped[list[Assignment]] = relationship(back_populates="member")
 
+    @property
+    def discord_user_id(self) -> str:
+        return self.user.discord_user_id if self.user else ""
+
+    @property
+    def username(self) -> str:
+        return self.user.username if self.user else ""
+
     def __repr__(self) -> str:  # pragma: no cover
         return f"<MemberProfile {self.display_name} role={self.role}>"

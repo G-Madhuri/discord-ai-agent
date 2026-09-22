@@ -13,10 +13,13 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.project import Project, ProjectDocument
+from app.core.logging import get_logger
+from app.models.project import DocumentChunk, Project, ProjectDocument
 from app.rag.interfaces import KnowledgeScope, ScoredChunk
 from app.rag.pipeline import KnowledgePipeline, build_pipeline, content_hash
 from app.schemas.project import DocumentCreate, DocumentRead, KnowledgeHit, KnowledgeSearchResult
+
+logger = get_logger(__name__)
 
 
 def scope_for(project: Project) -> KnowledgeScope:
@@ -108,6 +111,16 @@ async def search_knowledge(
     top_k: int | None = None,
     pipeline: KnowledgePipeline | None = None,
 ) -> list[ScoredChunk]:
+    # Skip retrieval entirely if the project has no ingested document_chunks
+    stmt = sa.select(sa.func.count()).select_from(DocumentChunk).where(
+        DocumentChunk.server_id == project.server_id,
+        DocumentChunk.project_id == project.id,
+    )
+    chunk_count = (await session.execute(stmt)).scalar_one()
+    if chunk_count == 0:
+        logger.info("RAG SKIPPED | no documents for project %s", project.id)
+        return []
+
     pipeline = pipeline or build_pipeline(session)
     return await pipeline.search(scope_for(project), query, top_k=top_k or settings.rag_top_k)
 
